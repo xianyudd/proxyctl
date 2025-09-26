@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::time::Duration; // 新增：Duration & 计时
 use std::{fs, process::Command};
 
-/// ====================== CLI ======================
+// ====================== CLI ======================
 #[derive(Parser)]
 #[command(name = "proxyctl", version = "0.6")]
 struct Cli {
@@ -61,7 +61,7 @@ enum Cmd {
     },
 }
 
-/// ====================== 配置 ======================
+// ====================== 配置 ======================
 #[derive(Debug, Default, Deserialize)]
 struct Config {
     #[serde(default)]
@@ -115,7 +115,7 @@ fn load_config() -> Config {
         .unwrap_or_default()
 }
 
-/// ====================== 代理连通性测试 ======================
+// ====================== 代理连通性测试 ======================
 
 // 经 HTTP 代理的 blocking 客户端
 fn build_client_via_http(
@@ -217,7 +217,7 @@ fn test_proxy(ip: &str, p: &EffPorts, timeout_secs: u64, dry_run: bool) {
     }
 }
 
-/// ====================== IP 选择 ======================
+// ====================== IP 选择 ======================
 fn auto_detect_ip() -> Option<String> {
     let out = Command::new("sh")
         .arg("-c")
@@ -250,7 +250,7 @@ fn effective_ports(cfg: &ProxySection, override_profile: Option<Profile>) -> Eff
     }
 }
 
-/// ====================== 进程内设置（非 fish 回退） ======================
+// ====================== 进程内设置（非 fish 回退） ======================
 fn safe_set_var(key: &str, val: &str) {
     debug_assert!(!key.contains('\0') && !val.contains('\0'));
     unsafe { std::env::set_var(key, val) };
@@ -286,7 +286,7 @@ fn status_in_process() {
     }
 }
 
-/// ====================== fish universal variables（无需 eval） ======================
+// ====================== fish universal variables（无需 eval） ======================
 fn is_fish() -> bool {
     std::env::var("SHELL").unwrap_or_default().contains("fish")
 }
@@ -324,7 +324,7 @@ fn fish_print_status() {
     }
 }
 
-/// ====================== 模式选择 ======================
+// ====================== 模式选择 ======================
 fn resolve_mode(cli_mode: Mode) -> Mode {
     match cli_mode {
         Mode::Auto => {
@@ -338,7 +338,7 @@ fn resolve_mode(cli_mode: Mode) -> Mode {
     }
 }
 
-/// ====================== main ======================
+// ====================== main ======================
 fn main() {
     let cli = Cli::parse();
     let cfg = load_config();
