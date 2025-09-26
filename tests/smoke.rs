@@ -104,3 +104,52 @@ fn status_process_mode_prints_not_set() {
         // 不和整行比，只要包含 Not Set 即可；前面可能带“已生成默认配置”提示
         .stdout(predicate::str::contains("Not Set"));
 }
+
+#[test]
+fn test_dry_run_mixed_profile_shows_ports_and_sites() {
+    let tmp = TempDir::new().unwrap();
+    bin_in_temp_home(&tmp)
+        .args([
+            "--mode",
+            "process",
+            "test",
+            "--ip",
+            "1.2.3.4",
+            "--timeout",
+            "1",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Using IP: 1.2.3.4  (http 7890, socks 7890)",
+        ))
+        .stdout(predicate::str::contains("HTTP proxy:"))
+        .stdout(predicate::str::contains("http://1.2.3.4:7890"))
+        .stdout(predicate::str::contains("SOCKS5 proxy"))
+        .stdout(predicate::str::contains("socks5h://1.2.3.4:7890"))
+        .stdout(predicate::str::contains("youtube.com/robots.txt")); // 断言包含 YouTube
+}
+
+#[test]
+fn test_dry_run_split_profile_shows_expected_ports() {
+    let tmp = TempDir::new().unwrap();
+    bin_in_temp_home(&tmp)
+        .args([
+            "--mode",
+            "process",
+            "--profile",
+            "split",
+            "test",
+            "--ip",
+            "1.2.3.4",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Using IP: 1.2.3.4  (http 7892, socks 7891)",
+        ))
+        .stdout(predicate::str::contains("http://1.2.3.4:7892"))
+        .stdout(predicate::str::contains("socks5h://1.2.3.4:7891"));
+}

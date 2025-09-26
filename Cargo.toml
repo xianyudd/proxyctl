@@ -7,7 +7,7 @@ edition = "2024"
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 toml  = "0.8"
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls", "socks"] }
 dirs = "5.0"
 
 [dev-dependencies]

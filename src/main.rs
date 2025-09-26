@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
+use std::time::Duration; // 新增：Duration & 计时
 use std::{fs, process::Command};
 
 /// ====================== CLI ======================
@@ -43,6 +44,21 @@ enum Cmd {
     Off,
     /// 查看状态
     Status,
+
+    /// 测试代理连通性
+    Test {
+        /// 覆盖宿主机ip
+        #[arg(long)]
+        ip: Option<String>,
+
+        /// 超时时间
+        #[arg(long, default_value_t = 5)]
+        timeout: u64,
+
+        /// 仅打印将要测试的代理与站点，不实际发请求（用于测试/CI）
+        #[arg(long, hide = true)]
+        dry_run: bool,
+    },
 }
 
 /// ====================== 配置 ======================
@@ -97,6 +113,108 @@ fn load_config() -> Config {
         .ok()
         .and_then(|txt| toml::from_str(&txt).ok())
         .unwrap_or_default()
+}
+
+/// ====================== 代理连通性测试 ======================
+
+// 经 HTTP 代理的 blocking 客户端
+fn build_client_via_http(
+    ip: &str,
+    port: u16,
+    timeout: Duration,
+) -> Option<reqwest::blocking::Client> {
+    let proxy = format!("http://{}:{}", ip, port);
+    reqwest::blocking::Client::builder()
+        .proxy(reqwest::Proxy::all(&proxy).ok()?)
+        .timeout(timeout)
+        .user_agent("proxyctl/0.6")
+        .build()
+        .ok()
+}
+
+// 经 SOCKS5(h) 代理的 blocking 客户端（h：让代理解析域名）
+fn build_client_via_socks(
+    ip: &str,
+    port: u16,
+    timeout: Duration,
+) -> Option<reqwest::blocking::Client> {
+    let proxy = format!("socks5h://{}:{}", ip, port);
+    reqwest::blocking::Client::builder()
+        .proxy(reqwest::Proxy::all(&proxy).ok()?)
+        .timeout(timeout)
+        .user_agent("proxyctl/0.6")
+        .build()
+        .ok()
+}
+
+// 修改：新增 dry_run 参数；为 true 时不发请求，只打印将要测试的站点
+fn test_sites_via(label: &str, client: &reqwest::blocking::Client, sites: &[&str], dry_run: bool) {
+    println!("🔎 Testing via {label} …");
+
+    if dry_run {
+        for &url in sites {
+            println!("  [DRY] ----  ----  {}", url);
+        }
+        println!();
+        return;
+    }
+
+    use std::io;
+    for &url in sites {
+        let t0 = std::time::Instant::now();
+        let resp = client
+            .get(url)
+            .header("Accept", "text/html,*/*;q=0.8")
+            .send();
+
+        match resp {
+            Ok(mut r) => {
+                let status = r.status();
+                // 丢进“黑洞”，读完但不分配
+                let _ = io::copy(&mut r, &mut io::sink());
+                let ms = t0.elapsed().as_millis();
+                println!("  [OK ] {:>3}  {:>4}ms  {}", status.as_u16(), ms, url);
+            }
+            Err(e) => {
+                let ms = t0.elapsed().as_millis();
+                println!("  [ERR] ----  {:>4}ms  {}  ({})", ms, url, e);
+            }
+        }
+    }
+    println!();
+}
+
+// 汇总：对 HTTP 和 SOCKS5 分别测一遍
+fn test_proxy(ip: &str, p: &EffPorts, timeout_secs: u64, dry_run: bool) {
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+
+    // 测试站点
+    let sites = [
+        "https://www.google.com/generate_204",
+        "https://www.github.com/",
+        "https://www.youtube.com/robots.txt",
+        "https://huggingface.co/",
+        "https://www.cloudflare.com/cdn-cgi/trace",
+    ];
+
+    // 测试 HTTP 代理
+    if let Some(c) = build_client_via_http(ip, p.http, timeout) {
+        println!("➡️  HTTP proxy:  http://{}:{}", ip, p.http);
+        test_sites_via("HTTP proxy", &c, &sites, dry_run);
+    } else {
+        println!("⚠️ 无法构建 HTTP 代理客户端（http://{}:{}）。", ip, p.http);
+    }
+
+    // 测试 SOCKS5 代理
+    if let Some(c) = build_client_via_socks(ip, p.socks, timeout) {
+        println!("➡️  SOCKS5 proxy: socks5h://{}:{}", ip, p.socks);
+        test_sites_via("SOCKS5 proxy", &c, &sites, dry_run);
+    } else {
+        println!(
+            "⚠️ 无法构建 SOCKS5 代理客户端（socks5h://{}:{}）。",
+            ip, p.socks
+        );
+    }
 }
 
 /// ====================== IP 选择 ======================
@@ -266,6 +384,26 @@ fn main() {
                 Mode::Auto => unreachable!(),
             }
         }
+        Cmd::Test {
+            ip,
+            timeout,
+            dry_run,
+        } => {
+            let chosen = choose_ip(ip, cfg.proxy.host_ip.clone());
+            match chosen {
+                Some(ip_use) => {
+                    println!(
+                        "✅ Using IP: {}  (http {}, socks {})",
+                        ip_use, ports.http, ports.socks
+                    );
+                    test_proxy(&ip_use, &ports, timeout, dry_run);
+                }
+                None => eprintln!(
+                    "⚠️ 无法确定宿主机 IP。请用 --ip 指定或在 ~/.proxyctl.toml 的 [proxy].host_ip 中设置。"
+                ),
+            }
+        }
+
         Cmd::Status => match mode {
             Mode::FishUvars => fish_print_status(),
             Mode::Process => status_in_process(),
