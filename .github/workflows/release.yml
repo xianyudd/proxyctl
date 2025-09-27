@@ -3,7 +3,7 @@ name: Release Linux Binaries
 on:
   push:
     tags:
-      - "v*.*.*"   # 推 v0.1.0 这样的 tag 自动触发
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -23,12 +23,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      # musl 静态：用 zigbuild 更兼容
       - name: Install zig (musl only)
         if: matrix.musl == true
         uses: goto-bus-stop/setup-zig@v2
@@ -60,7 +58,7 @@ jobs:
           upx --best --lzma "$BIN"
           upx -t "$BIN"
 
-      - name: Package (with version & latest aliases)
+      - name: Package (versioned + latest aliases)
         run: |
           set -eux
           TGT="${{ matrix.target }}"
@@ -71,22 +69,49 @@ jobs:
           [ -f README.md ] && cp README.md "${OUT}/" || true
           [ -f config.example.toml ] && cp config.example.toml "${OUT}/" || true
 
-          # 带版本号文件（用于具体版本下载）
+          # 带版本号
           PKG_VER="proxyctl-${GITHUB_REF_NAME}-${TGT}.tar.gz"
           tar -czf "${PKG_VER}" -C "${OUT}" .
           sha256sum "${PKG_VER}" > "${PKG_VER}.sha256"
 
-          # 无版本号别名（用于 latest 固定链接）
+          # 无版本号（latest 用）
           PKG="proxyctl-${TGT}.tar.gz"
           cp "${PKG_VER}" "${PKG}"
           cp "${PKG_VER}.sha256" "${PKG}.sha256"
 
-          echo "FILES=${PKG_VER} ${PKG_VER}.sha256 ${PKG} ${PKG}.sha256" >> $GITHUB_ENV
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.target }}
+          path: |
+            proxyctl-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+            proxyctl-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+            proxyctl-${{ matrix.target }}.tar.gz
+            proxyctl-${{ matrix.target }}.tar.gz.sha256
 
-      - name: Upload to Release
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: List files (debug)
+        run: ls -lah
+
+      - name: Create/Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.FILES }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            proxyctl-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz
+            proxyctl-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz.sha256
+            proxyctl-x86_64-unknown-linux-gnu.tar.gz
+            proxyctl-x86_64-unknown-linux-gnu.tar.gz.sha256
+            proxyctl-${{ github.ref_name }}-x86_64-unknown-linux-musl.tar.gz
+            proxyctl-${{ github.ref_name }}-x86_64-unknown-linux-musl.tar.gz.sha256
+            proxyctl-x86_64-unknown-linux-musl.tar.gz
+            proxyctl-x86_64-unknown-linux-musl.tar.gz.sha256
 
