@@ -5,6 +5,9 @@ on:
     tags:
       - "v*.*.*"   # 推 v0.1.0 这样的 tag 自动触发
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: build (${{ matrix.target }})
