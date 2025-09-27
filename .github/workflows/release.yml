@@ -1,0 +1,89 @@
+name: Release Linux Binaries
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # 推 v0.1.0 这样的 tag 自动触发
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            musl: false
+          - target: x86_64-unknown-linux-musl
+            musl: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # musl 静态：用 zigbuild 更兼容
+      - name: Install zig (musl only)
+        if: matrix.musl == true
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.11.0
+
+      - name: Install cargo-zigbuild (musl only)
+        if: matrix.musl == true
+        run: cargo install cargo-zigbuild || true
+
+      - name: Install upx
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
+      - name: Build
+        run: |
+          set -eux
+          if [ "${{ matrix.musl }}" = "true" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}
+          else
+            export RUSTFLAGS="-C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--icf=all -C link-arg=-Wl,--as-needed"
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Strip & UPX
+        run: |
+          set -eux
+          BIN="target/${{ matrix.target }}/release/proxyctl"
+          strip --strip-all "$BIN" || true
+          upx --best --lzma "$BIN"
+          upx -t "$BIN"
+
+      - name: Package (with version & latest aliases)
+        run: |
+          set -eux
+          TGT="${{ matrix.target }}"
+          OUT="pkg-${TGT}"
+          mkdir -p "${OUT}"
+          cp "target/${TGT}/release/proxyctl" "${OUT}/"
+          [ -f LICENSE ] && cp LICENSE "${OUT}/" || true
+          [ -f README.md ] && cp README.md "${OUT}/" || true
+          [ -f config.example.toml ] && cp config.example.toml "${OUT}/" || true
+
+          # 带版本号文件（用于具体版本下载）
+          PKG_VER="proxyctl-${GITHUB_REF_NAME}-${TGT}.tar.gz"
+          tar -czf "${PKG_VER}" -C "${OUT}" .
+          sha256sum "${PKG_VER}" > "${PKG_VER}.sha256"
+
+          # 无版本号别名（用于 latest 固定链接）
+          PKG="proxyctl-${TGT}.tar.gz"
+          cp "${PKG_VER}" "${PKG}"
+          cp "${PKG_VER}.sha256" "${PKG}.sha256"
+
+          echo "FILES=${PKG_VER} ${PKG_VER}.sha256 ${PKG} ${PKG}.sha256" >> $GITHUB_ENV
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.FILES }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
